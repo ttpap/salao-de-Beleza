@@ -1,12 +1,27 @@
 import { NextResponse } from "next/server";
-import { store } from "@/lib/store";
+import { getSupabase } from "@/lib/supabase";
 
 export async function GET() {
-  return NextResponse.json(store.getServices());
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("services")
+    .select("*")
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
 }
 
 export async function POST(request: Request) {
-  const data = await request.json();
-  const service = store.addService(data);
-  return NextResponse.json(service, { status: 201 });
+  const supabase = getSupabase();
+  const body = await request.json();
+  const { data, error } = await supabase
+    .from("services")
+    .insert(body)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data, { status: 201 });
 }

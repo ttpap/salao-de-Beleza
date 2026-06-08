@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
-import { store } from "@/lib/store";
+import { getSupabase } from "@/lib/supabase";
 
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const data = await request.json();
-  const appointment = store.updateAppointment(id, data);
-  if (!appointment) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(appointment);
+  const supabase = getSupabase();
+  const body = await request.json();
+  const { data, error } = await supabase
+    .from("appointments")
+    .update(body)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
 }
 
 export async function DELETE(
@@ -17,6 +24,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  store.deleteAppointment(id);
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("appointments")
+    .delete()
+    .eq("id", id);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
