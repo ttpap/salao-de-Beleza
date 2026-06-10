@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Salão de Beleza — Sistema de Gestão",
-  description: "Sistema de agendamento, comissões e gestão para salão de beleza",
+  title: "Adicléa Meireles — Instituto de Beleza",
+  description: "Sistema de agendamento, comissões e gestão — Adicléa Meireles Instituto de Beleza",
 };
 
 export default function RootLayout({

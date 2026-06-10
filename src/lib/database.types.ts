@@ -97,6 +97,7 @@ export type Appointment = {
   notes: string | null;
   price: number;
   google_event_id: string | null;
+  google_master_event_id: string | null;
 };
 
 export type AppointmentWithRelations = Appointment & {

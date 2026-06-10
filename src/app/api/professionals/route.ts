@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { getSupabase } from "@/lib/supabase";
 
 export async function GET() {
@@ -23,5 +24,20 @@ export async function POST(request: Request) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (data && data.email) {
+    const hash = await bcrypt.hash("123", 10);
+    await supabase.from("app_users").upsert(
+      {
+        email: data.email,
+        password_hash: hash,
+        role: "profissional",
+        professional_id: data.id,
+        name: data.name,
+      },
+      { onConflict: "email" }
+    );
+  }
+
   return NextResponse.json(data, { status: 201 });
 }

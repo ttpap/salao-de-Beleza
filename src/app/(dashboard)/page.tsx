@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,6 +12,7 @@ import {
   Clock,
   Scissors,
 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import type { AppointmentWithRelations } from "@/lib/database.types";
 
 type Stats = {
@@ -39,20 +41,35 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function DashboardPage() {
+  const { profile, loading: authLoading } = useAuth();
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [appointments, setAppointments] = useState<AppointmentWithRelations[]>([]);
 
+  // Professionals go straight to agendamentos
   useEffect(() => {
+    if (!authLoading && profile?.role === "profissional") {
+      router.replace("/agendamentos");
+    }
+  }, [authLoading, profile, router]);
+
+  useEffect(() => {
+    if (authLoading || profile?.role === "profissional") return;
     fetch("/api/dashboard").then((r) => r.json()).then(setStats);
     const today = new Date().toISOString().split("T")[0];
     fetch(`/api/appointments?date=${today}`).then((r) => r.json()).then(setAppointments);
-  }, []);
+  }, [authLoading, profile]);
 
   if (!stats) return <DashboardSkeleton />;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex items-center gap-4">
+        <div className="rounded-lg overflow-hidden bg-[#1a1208] p-2">
+          <img src="/logo.png" alt="Adicléa Meireles" className="h-12 w-auto" />
+        </div>
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard

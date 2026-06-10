@@ -105,25 +105,25 @@ const demoAppointments: Appointment[] = [
     id: "a1", created_at: new Date().toISOString(),
     client_id: "c1", professional_id: "p1", service_id: "s1",
     date: todayStr(), start_time: "09:00", end_time: "09:45",
-    status: "concluido", notes: null, price: 80, google_event_id: null,
+    status: "concluido", notes: null, price: 80, google_event_id: null, google_master_event_id: null,
   },
   {
     id: "a2", created_at: new Date().toISOString(),
     client_id: "c2", professional_id: "p2", service_id: "s2",
     date: todayStr(), start_time: "10:00", end_time: "10:30",
-    status: "confirmado", notes: null, price: 50, google_event_id: null,
+    status: "confirmado", notes: null, price: 50, google_event_id: null, google_master_event_id: null,
   },
   {
     id: "a3", created_at: new Date().toISOString(),
     client_id: "c3", professional_id: "p3", service_id: "s4",
     date: todayStr(), start_time: "14:00", end_time: "15:30",
-    status: "agendado", notes: "Primeira coloração", price: 150, google_event_id: null,
+    status: "agendado", notes: "Primeira coloração", price: 150, google_event_id: null, google_master_event_id: null,
   },
   {
     id: "a4", created_at: new Date().toISOString(),
     client_id: "c1", professional_id: "p3", service_id: "s3",
     date: todayStr(), start_time: "16:00", end_time: "16:40",
-    status: "agendado", notes: null, price: 60, google_event_id: null,
+    status: "agendado", notes: null, price: 60, google_event_id: null, google_master_event_id: null,
   },
 ];
 

@@ -32,7 +32,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, ChevronLeft, ChevronRight, Trash2, Calendar } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Trash2, Calendar, Pencil, DollarSign } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import type {
   Professional,
   Client,
@@ -135,14 +136,44 @@ function getDaysInRange(start: Date, end: Date): Date[] {
 }
 
 export default function AgendamentosPage() {
+  const { profile } = useAuth();
+  const isProfessional = profile?.role === "profissional";
+  const myProfessionalId = profile?.professional_id;
+
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("dia");
-  const [appointments, setAppointments] = useState<AppointmentWithRelations[]>([]);
+  const [allAppointments, setAllAppointments] = useState<AppointmentWithRelations[]>([]);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createDate, setCreateDate] = useState<string>("");
+
+  // Edit state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingAppt, setEditingAppt] = useState<AppointmentWithRelations | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editProfessional, setEditProfessional] = useState("");
+  const [editClient, setEditClient] = useState("");
+  const [editService, setEditService] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editStatus, setEditStatus] = useState<AppointmentStatus>("agendado");
+
+  // Commission state for professional view
+  const [commissionData, setCommissionData] = useState<{
+    commission: number;
+    paid: number;
+    advances: number;
+    balance: number;
+  } | null>(null);
+
+  const appointments = useMemo(() => {
+    if (isProfessional && myProfessionalId) {
+      return allAppointments.filter((a) => a.professional_id === myProfessionalId);
+    }
+    return allAppointments;
+  }, [allAppointments, isProfessional, myProfessionalId]);
 
   const [formProfessional, setFormProfessional] = useState("");
   const [formClient, setFormClient] = useState("");
@@ -165,13 +196,13 @@ export default function AgendamentosPage() {
       const dateStr = formatDate(selectedDate);
       fetch(`/api/appointments?date=${dateStr}`)
         .then((r) => r.json())
-        .then(setAppointments);
+        .then(setAllAppointments);
     } else {
       const from = formatDate(dateRange.start);
       const to = formatDate(dateRange.end);
       fetch(`/api/appointments?date_from=${from}&date_to=${to}`)
         .then((r) => r.json())
-        .then(setAppointments);
+        .then(setAllAppointments);
     }
   }, [selectedDate, viewMode, dateRange]);
 
@@ -190,6 +221,30 @@ export default function AgendamentosPage() {
       setServices(svcs);
     });
   }, []);
+
+  // Load commission data for professional view
+  useEffect(() => {
+    if (!isProfessional || !myProfessionalId) return;
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+
+    Promise.all([
+      fetch(`/api/commissions?startDate=${start}&endDate=${end}`).then((r) => r.json()),
+      fetch(`/api/payments?month=${month}&professional_id=${myProfessionalId}`).then((r) => r.json()),
+    ]).then(([commissions, payments]) => {
+      const myComm = commissions.find((c: { professional: { id: string } }) => c.professional.id === myProfessionalId);
+      const commission = myComm?.commission || 0;
+      const paid = (payments as { type: string; amount: number }[])
+        .filter((p) => p.type === "pagamento")
+        .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+      const advances = (payments as { type: string; amount: number }[])
+        .filter((p) => p.type === "adiantamento")
+        .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+      setCommissionData({ commission, paid, advances, balance: commission - paid - advances });
+    });
+  }, [isProfessional, myProfessionalId]);
 
   const navigate = (direction: -1 | 1) => {
     const d = new Date(selectedDate);
@@ -245,6 +300,46 @@ export default function AgendamentosPage() {
     loadAppointments();
   };
 
+  const openEditDialog = (appt: AppointmentWithRelations) => {
+    setEditingAppt(appt);
+    setEditDate(appt.date);
+    setEditProfessional(appt.professional_id);
+    setEditClient(appt.client_id);
+    setEditService(appt.service_id);
+    setEditTime(appt.start_time.slice(0, 5));
+    setEditNotes(appt.notes || "");
+    setEditStatus(appt.status);
+    setEditDialogOpen(true);
+  };
+
+  const handleEdit = async () => {
+    if (!editingAppt) return;
+    const service = services.find((s) => s.id === editService);
+    if (!service || !editProfessional || !editClient) return;
+
+    const data = {
+      client_id: editClient,
+      professional_id: editProfessional,
+      service_id: editService,
+      date: editDate,
+      start_time: editTime,
+      end_time: addMinutes(editTime, service.duration_min),
+      status: editStatus,
+      notes: editNotes || null,
+      price: service.price,
+    };
+
+    await fetch(`/api/appointments/${editingAppt.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    setEditDialogOpen(false);
+    setEditingAppt(null);
+    loadAppointments();
+  };
+
   const updateStatus = async (id: string, status: AppointmentStatus) => {
     await fetch(`/api/appointments/${id}`, {
       method: "PUT",
@@ -269,7 +364,8 @@ export default function AgendamentosPage() {
     return formatMonthYear(selectedDate);
   }, [selectedDate, viewMode, dateRange]);
 
-  // Appointment card used in all views
+  const isAdmin = profile?.role === "admin";
+
   const AppointmentCard = ({ appt }: { appt: AppointmentWithRelations }) => (
     <div className={`rounded-md border p-2 text-sm ${statusColors[appt.status]}`}>
       <div className="flex items-center justify-between">
@@ -277,42 +373,50 @@ export default function AgendamentosPage() {
           <span className="font-medium">{appt.start_time.slice(0, 5)}–{appt.end_time.slice(0, 5)}</span>
           {" "}{appt.client?.name || "—"}
         </div>
-        <div className="flex items-center gap-1">
-          <Select
-            value={appt.status}
-            onValueChange={(v) => updateStatus(appt.id, v as AppointmentStatus)}
-          >
-            <SelectTrigger className="h-7 w-auto text-xs border-0 bg-transparent">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {allStatuses.map((s) => (
-                <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6">
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Agendamento de {appt.client?.name || "cliente"} será removido.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Não</AlertDialogCancel>
-                <AlertDialogAction onClick={() => deleteAppointment(appt.id)}>
-                  Sim, remover
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-1">
+            <Select
+              value={appt.status}
+              onValueChange={(v) => updateStatus(appt.id, v as AppointmentStatus)}
+            >
+              <SelectTrigger className="h-7 w-auto text-xs border-0 bg-transparent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {allStatuses.map((s) => (
+                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditDialog(appt)}>
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6">
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Agendamento de {appt.client?.name || "cliente"} será removido.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Não</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => deleteAppointment(appt.id)}>
+                    Sim, remover
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
+        {!isAdmin && (
+          <Badge className={statusColors[appt.status]}>{statusLabels[appt.status]}</Badge>
+        )}
       </div>
       <div className="text-xs opacity-75">
         {appt.service?.name || "—"} — {appt.professional?.name || "—"} — R$ {appt.price.toFixed(2)}
@@ -323,7 +427,6 @@ export default function AgendamentosPage() {
     </div>
   );
 
-  // DAY VIEW — time slots
   const DayView = () => (
     <Card>
       <CardHeader>
@@ -353,7 +456,6 @@ export default function AgendamentosPage() {
     </Card>
   );
 
-  // WEEK VIEW — columns per day
   const WeekView = () => {
     const days = getDaysInRange(dateRange.start, dateRange.end);
     const today = new Date();
@@ -363,74 +465,81 @@ export default function AgendamentosPage() {
         <CardHeader>
           <CardTitle className="text-base">Agenda da Semana</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-7 gap-2">
-            {days.map((day) => {
-              const dateStr = formatDate(day);
-              const dayAppts = appointments.filter((a) => a.date === dateStr);
-              const isToday = isSameDay(day, today);
-
-              return (
-                <div key={dateStr} className="min-h-[120px]">
+        <CardContent className="overflow-x-auto">
+          <div className="min-w-[700px]">
+            {/* Day headers */}
+            <div className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-0 border-b mb-1">
+              <div className="shrink-0" />
+              {days.map((day) => {
+                const isToday = isSameDay(day, today);
+                return (
                   <button
+                    key={formatDate(day)}
                     onClick={() => {
                       setSelectedDate(day);
                       setViewMode("dia");
                     }}
-                    className={`w-full text-center text-xs font-medium py-1 rounded-t-md mb-1 hover:bg-accent transition-colors ${
+                    className={`text-center text-xs font-medium py-1.5 hover:bg-accent transition-colors ${
                       isToday
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground"
+                        ? "bg-primary text-primary-foreground rounded-t-md"
+                        : "text-muted-foreground"
                     }`}
                   >
                     <div className="capitalize">{formatWeekday(day)}</div>
                     <div className="text-sm font-bold">{day.getDate()}</div>
                   </button>
-                  <div className="space-y-1">
-                    {dayAppts.map((appt) => (
-                      <div
-                        key={appt.id}
-                        className={`rounded border p-1.5 text-xs ${statusColors[appt.status]} cursor-pointer`}
-                        onClick={() => {
-                          setSelectedDate(day);
-                          setViewMode("dia");
-                        }}
-                      >
-                        <div className="font-medium">{appt.start_time.slice(0, 5)}</div>
-                        <div className="truncate">{appt.client?.name || "—"}</div>
-                        <div className="truncate opacity-75">{appt.service?.name || "—"}</div>
-                      </div>
-                    ))}
-                    {dayAppts.length === 0 && (
-                      <button
-                        onClick={() => openCreateDialog(dateStr)}
-                        className="w-full text-xs text-muted-foreground hover:text-primary hover:bg-accent rounded p-1 transition-colors"
-                      >
-                        + Agendar
-                      </button>
-                    )}
-                  </div>
+                );
+              })}
+            </div>
+
+            {/* Hour rows */}
+            {hours.map((hour) => (
+              <div key={hour} className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-0 min-h-[3.5rem] border-b border-dashed border-muted">
+                <div className="text-[11px] font-mono text-muted-foreground pt-1 pr-2 text-right shrink-0">
+                  {hour}
                 </div>
-              );
-            })}
+                {days.map((day) => {
+                  const dateStr = formatDate(day);
+                  const hourAppts = appointments.filter(
+                    (a) => a.date === dateStr && a.start_time.slice(0, 2) === hour.slice(0, 2)
+                  );
+
+                  return (
+                    <div
+                      key={dateStr}
+                      className="border-l px-0.5 pt-0.5 space-y-0.5 min-h-[3.5rem]"
+                    >
+                      {hourAppts.map((appt) => (
+                        <div
+                          key={appt.id}
+                          className={`rounded border p-1 text-[11px] leading-tight ${statusColors[appt.status]} ${isAdmin ? "cursor-pointer hover:opacity-80" : ""}`}
+                          onClick={() => isAdmin && openEditDialog(appt)}
+                        >
+                          <div className="font-medium">{appt.start_time.slice(0, 5)}</div>
+                          <div className="truncate">{appt.client?.name || "—"}</div>
+                          <div className="truncate opacity-75">{appt.professional?.name || "—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
     );
   };
 
-  // MONTH VIEW — calendar grid
   const MonthView = () => {
     const { start, end } = dateRange;
     const today = new Date();
 
-    // Pad to start on Monday
     const startDay = start.getDay();
     const padStart = startDay === 0 ? 6 : startDay - 1;
     const calStart = new Date(start);
     calStart.setDate(calStart.getDate() - padStart);
 
-    // Pad to end on Sunday
     const endDay = end.getDay();
     const padEnd = endDay === 0 ? 0 : 7 - endDay;
     const calEnd = new Date(end);
@@ -501,77 +610,152 @@ export default function AgendamentosPage() {
     );
   };
 
+  const AppointmentFormFields = ({
+    date, setDate,
+    client, setClient,
+    professional, setProfessionalVal,
+    service, setService,
+    time, setTime,
+    notes, setNotes,
+    status, setStatus,
+    showStatus,
+  }: {
+    date: string; setDate: (v: string) => void;
+    client: string; setClient: (v: string) => void;
+    professional: string; setProfessionalVal: (v: string) => void;
+    service: string; setService: (v: string) => void;
+    time: string; setTime: (v: string) => void;
+    notes: string; setNotes: (v: string) => void;
+    status?: AppointmentStatus; setStatus?: (v: AppointmentStatus) => void;
+    showStatus?: boolean;
+  }) => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Data</Label>
+        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </div>
+      <div className="space-y-2">
+        <Label>Cliente</Label>
+        <Select value={client} onValueChange={setClient}>
+          <SelectTrigger><SelectValue placeholder="Selecione o cliente" /></SelectTrigger>
+          <SelectContent>
+            {clients.map((c) => (
+              <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Profissional</Label>
+        <Select value={professional} onValueChange={setProfessionalVal}>
+          <SelectTrigger><SelectValue placeholder="Selecione o profissional" /></SelectTrigger>
+          <SelectContent>
+            {professionals.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Serviço</Label>
+        <Select value={service} onValueChange={setService}>
+          <SelectTrigger><SelectValue placeholder="Selecione o serviço" /></SelectTrigger>
+          <SelectContent>
+            {services.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name} — {s.duration_min}min — R$ {s.price.toFixed(2)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label>Horário</Label>
+        <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
+      {showStatus && setStatus && (
+        <div className="space-y-2">
+          <Label>Status</Label>
+          <Select value={status} onValueChange={(v) => setStatus(v as AppointmentStatus)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {allStatuses.map((s) => (
+                <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      <div className="space-y-2">
+        <Label>Observações</Label>
+        <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Agendamentos</h1>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => openCreateDialog()}><Plus className="h-4 w-4 mr-2" />Novo Agendamento</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
+          {isAdmin && (
+            <DialogTrigger asChild>
+              <Button onClick={() => openCreateDialog()}><Plus className="h-4 w-4 mr-2" />Novo Agendamento</Button>
+            </DialogTrigger>
+          )}
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Novo Agendamento</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Data</Label>
-                <Input
-                  type="date"
-                  value={createDate || formatDate(selectedDate)}
-                  onChange={(e) => setCreateDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Cliente</Label>
-                <Select value={formClient} onValueChange={setFormClient}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o cliente" /></SelectTrigger>
-                  <SelectContent>
-                    {clients.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Profissional</Label>
-                <Select value={formProfessional} onValueChange={setFormProfessional}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o profissional" /></SelectTrigger>
-                  <SelectContent>
-                    {professionals.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Serviço</Label>
-                <Select value={formService} onValueChange={setFormService}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o serviço" /></SelectTrigger>
-                  <SelectContent>
-                    {services.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name} — {s.duration_min}min — R$ {s.price.toFixed(2)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Horário</Label>
-                <Input type="time" value={formTime} onChange={(e) => setFormTime(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Observações</Label>
-                <Textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
-              </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!formClient || !formProfessional || !formService}>
-                Agendar
-              </Button>
-            </div>
+            <AppointmentFormFields
+              date={createDate || formatDate(selectedDate)}
+              setDate={setCreateDate}
+              client={formClient}
+              setClient={setFormClient}
+              professional={formProfessional}
+              setProfessionalVal={setFormProfessional}
+              service={formService}
+              setService={setFormService}
+              time={formTime}
+              setTime={setFormTime}
+              notes={formNotes}
+              setNotes={setFormNotes}
+            />
+            <Button onClick={handleCreate} className="w-full" disabled={!formClient || !formProfessional || !formService}>
+              Agendar
+            </Button>
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Edit dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Agendamento</DialogTitle>
+          </DialogHeader>
+          <AppointmentFormFields
+            date={editDate}
+            setDate={setEditDate}
+            client={editClient}
+            setClient={setEditClient}
+            professional={editProfessional}
+            setProfessionalVal={setEditProfessional}
+            service={editService}
+            setService={setEditService}
+            time={editTime}
+            setTime={setEditTime}
+            notes={editNotes}
+            setNotes={setEditNotes}
+            status={editStatus}
+            setStatus={setEditStatus}
+            showStatus
+          />
+          <Button onClick={handleEdit} className="w-full" disabled={!editClient || !editProfessional || !editService}>
+            Salvar Alterações
+          </Button>
+        </DialogContent>
+      </Dialog>
 
       {/* View mode toggle + navigation */}
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -614,64 +798,106 @@ export default function AgendamentosPage() {
         </div>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                Resumo
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total</span>
-                <span className="font-medium">{appointments.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Concluídos</span>
-                <span className="font-medium">
-                  {appointments.filter((a) => a.status === "concluido").length}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Cancelados</span>
-                <span className="font-medium">
-                  {appointments.filter((a) => a.status === "cancelado").length}
-                </span>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="text-muted-foreground">Faturamento</span>
-                <span className="font-medium">
-                  R$ {appointments
-                    .filter((a) => a.status === "concluido")
-                    .reduce((s, a) => s + a.price, 0)
-                    .toFixed(2)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Por Profissional</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {professionals.map((prof) => {
-                const profAppts = appointments.filter(
-                  (a) => a.professional_id === prof.id
-                );
-                if (profAppts.length === 0) return null;
-                return (
-                  <div key={prof.id} className="flex justify-between text-sm">
-                    <span>{prof.name}</span>
-                    <Badge variant="secondary">{profAppts.length}</Badge>
+          {isAdmin && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Resumo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Total</span>
+                    <span className="font-medium">{appointments.length}</span>
                   </div>
-                );
-              })}
-              {appointments.length === 0 && (
-                <p className="text-sm text-muted-foreground">Nenhum agendamento no período.</p>
-              )}
-            </CardContent>
-          </Card>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Concluídos</span>
+                    <span className="font-medium">
+                      {appointments.filter((a) => a.status === "concluido").length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Cancelados</span>
+                    <span className="font-medium">
+                      {appointments.filter((a) => a.status === "cancelado").length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2">
+                    <span className="text-muted-foreground">Faturamento</span>
+                    <span className="font-medium">
+                      R$ {appointments
+                        .filter((a) => a.status === "concluido")
+                        .reduce((s, a) => s + a.price, 0)
+                        .toFixed(2)}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Por Profissional</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {professionals.map((prof) => {
+                    const profAppts = appointments.filter(
+                      (a) => a.professional_id === prof.id
+                    );
+                    if (profAppts.length === 0) return null;
+                    return (
+                      <div key={prof.id} className="flex justify-between text-sm">
+                        <span>{prof.name}</span>
+                        <Badge variant="secondary">{profAppts.length}</Badge>
+                      </div>
+                    );
+                  })}
+                  {appointments.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Nenhum agendamento no período.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {/* Commission card for professionals */}
+          {isProfessional && commissionData && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Minha Comissão (Mês)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Comissão</span>
+                  <span className="font-medium">R$ {commissionData.commission.toFixed(2)}</span>
+                </div>
+                {commissionData.advances > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Adiantamentos</span>
+                    <span className="font-medium text-orange-600">- R$ {commissionData.advances.toFixed(2)}</span>
+                  </div>
+                )}
+                {commissionData.paid > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Pago</span>
+                    <span className="font-medium text-green-600">- R$ {commissionData.paid.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t pt-2">
+                  <span className="font-medium">A Receber</span>
+                  {commissionData.balance <= 0.01 ? (
+                    <Badge className="bg-green-100 text-green-800">Quitado</Badge>
+                  ) : (
+                    <span className="font-bold text-lg">R$ {commissionData.balance.toFixed(2)}</span>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
