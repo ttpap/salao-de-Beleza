@@ -225,21 +225,25 @@ export default function AgendamentosPage() {
   // Load commission data for professional view
   useEffect(() => {
     if (!isProfessional || !myProfessionalId) return;
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+    const { start: weekStart, end: weekEnd } = getWeekRange(new Date());
+    const start = formatDate(weekStart);
+    const end = formatDate(weekEnd);
 
     Promise.all([
       fetch(`/api/commissions?startDate=${start}&endDate=${end}`).then((r) => r.json()),
-      fetch(`/api/payments?month=${month}&professional_id=${myProfessionalId}`).then((r) => r.json()),
+      fetch(`/api/payments?professional_id=${myProfessionalId}`).then((r) => r.json()),
     ]).then(([commissions, payments]) => {
       const myComm = commissions.find((c: { professional: { id: string } }) => c.professional.id === myProfessionalId);
       const commission = myComm?.commission || 0;
-      const paid = (payments as { type: string; amount: number }[])
+      // payments só têm reference_month; usamos created_at p/ recortar a semana
+      const inWeek = (payments as { created_at: string }[]).filter((p) => {
+        const d = p.created_at.slice(0, 10);
+        return d >= start && d <= end;
+      }) as { type: string; amount: number }[];
+      const paid = inWeek
         .filter((p) => p.type === "pagamento")
         .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
-      const advances = (payments as { type: string; amount: number }[])
+      const advances = inWeek
         .filter((p) => p.type === "adiantamento")
         .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
       setCommissionData({ commission, paid, advances, balance: commission - paid - advances });
@@ -867,7 +871,7 @@ export default function AgendamentosPage() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <DollarSign className="h-4 w-4" />
-                  Minha Comissão (Mês)
+                  Minha Comissão (Semana)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
