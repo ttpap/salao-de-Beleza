@@ -354,7 +354,7 @@ export default function AgendamentosPage() {
     loadAppointments();
   };
 
-  const hours = Array.from({ length: 12 }, (_, i) => `${String(i + 8).padStart(2, "0")}:00`);
+  const hours = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, "0")}:00`);
 
   const headerLabel = useMemo(() => {
     if (viewMode === "dia") return formatDateBR(selectedDate);
