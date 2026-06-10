@@ -236,10 +236,10 @@ export default function AgendamentosPage() {
       const myComm = commissions.find((c: { professional: { id: string } }) => c.professional.id === myProfessionalId);
       const commission = myComm?.commission || 0;
       // payments só têm reference_month; usamos created_at p/ recortar a semana
-      const inWeek = (payments as { created_at: string }[]).filter((p) => {
+      const inWeek = (payments as { created_at: string; type: string; amount: number }[]).filter((p) => {
         const d = p.created_at.slice(0, 10);
         return d >= start && d <= end;
-      }) as { type: string; amount: number }[];
+      });
       const paid = inWeek
         .filter((p) => p.type === "pagamento")
         .reduce((s: number, p: { amount: number }) => s + p.amount, 0);
